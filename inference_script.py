@@ -1,55 +1,50 @@
 import torch
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from peft import PeftModel
+from unsloth import FastLanguageModel
+from transformers import AutoTokenizer
 
-# ====== Load Base and Fine-Tuned Model ======
-base_model = AutoModelForCausalLM.from_pretrained(
-    "deepseek-ai/deepseek-coder-6.7b-instruct",
-    device_map="auto",
-    torch_dtype=torch.bfloat16,
-    trust_remote_code=True,
+# 🚀 Paths to the model and tokenizer
+MODEL_PATH = "/home/ayman/workspace/LLM_Project/qlora_finetuned_model"  # Replace with your actual save path
+
+# 💻 Load the model and tokenizer
+model, tokenizer = FastLanguageModel.from_pretrained(
+    model_name=MODEL_PATH,
+    max_seq_length=2048,  # Ensure it matches the max_seq_length during training
+    device_map="auto"  # Automatically maps to available GPU or CPU
 )
-model = PeftModel.from_pretrained(base_model, "./LLM_Project/qlora_finetuned_model")
+
+# Set the model to evaluation mode
 model.eval()
 
-# ====== Load Tokenizer ======
-tokenizer = AutoTokenizer.from_pretrained("./LLM_Project/qlora_finetuned_model")
-if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
-tokenizer.padding_side = "right"
-
-# ====== Inference Function ======
-def generate_sql(instruction: str, schema: str = "") -> str:
-    prompt = (
-        f"<instruction>\n{instruction.strip()}\n</instruction>\n"
-        f"<schema>\n{schema.strip()}\n</schema>\n"
-        f"<response>"
+# 🧐 Define the inference function
+def generate_response(prompt, max_length=2048, temperature=0.7, top_p=0.9):
+    inputs = tokenizer(
+        prompt,
+        return_tensors="pt",
+        padding=True,
+        truncation=True,
+        max_length=max_length
     )
-    inputs = tokenizer(prompt, return_tensors="pt").to("cuda")
+    
+    # Move input tensors to the appropriate device
+    input_ids = inputs.input_ids.to(model.device)
+    attention_mask = inputs.attention_mask.to(model.device)
+
+    # Generate response
     with torch.no_grad():
         outputs = model.generate(
-            **inputs,
-            max_new_tokens=150,
-            temperature=0.2,
-            top_p=0.95,
-            do_sample=True,
-            pad_token_id=tokenizer.eos_token_id,
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            max_length=max_length,
+            temperature=temperature,
+            top_p=top_p,
+            do_sample=True,  # Enables sampling for diverse outputs
         )
+
+    # Decode and return the generated text
     return tokenizer.decode(outputs[0], skip_special_tokens=True)
 
-# ====== Interactive CLI ======
+# 🧾 Inference example
 if __name__ == "__main__":
-    print("💬 Welcome to the SQL Query Generator!")
-    print("Type your natural language instruction (type 'exit' to quit):")
-
-    while True:
-        instruction = input("\n📝 Instruction: ").strip()
-        if instruction.lower() in {"exit", "quit"}:
-            print("👋 Exiting. Have a great day!")
-            break
-
-        schema = input("📘 (Optional) Schema: ").strip()
-        print("\n⏳ Generating SQL Query...\n")
-        sql = generate_sql(instruction, schema)
-        print("🧾 Generated SQL Query:\n")
-        print(sql)
+    prompt = "<|user|>\nExplain the advantages of using LoRA for fine-tuning large language models.\n<|assistant|>\n"
+    response = generate_response(prompt)
+    print("Response:", response)
